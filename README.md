@@ -1,7 +1,7 @@
 # Benchmark
 
 Benchmarks for the linear-time risk-measure algorithms in
-[RiskMeasures.jl](https://github.com/marekpetrik/RiskMeasures.jl). This project
+[RiskMeasures.jl](https://github.com/RiskAverseRL/RiskMeasures.jl). This project
 times CVaR, qCVaR, VaR, qVaR, TVaR, qTVaR and the plain expectation on both
 randomly generated and stock-derived distributions.
 
