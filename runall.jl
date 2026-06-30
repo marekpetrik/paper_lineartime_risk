@@ -16,6 +16,7 @@ println("Plotting!")
 
 # Plot every benchmark CSV in the directory
 for csvfile in filter(f -> endswith(f, ".csv"), readdir())
+    println("Plotting $csvfile")
     plt = plot_result(csvfile)
     savefig(plt, replace(csvfile, ".csv" => ".pdf"))
 end
