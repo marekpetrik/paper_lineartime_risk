@@ -298,10 +298,13 @@ Plot the mean line and a shaded confidence-interval ribbon for `col`.
 function plot_means_and_cis!(plt, plotter::Plotter, col::String)
     unique_sizes = unique(plotter.df.n)
     cis, means = plotter.CI[col]
+    # Fast methods are drawn with a solid line, standard ones with a dashed line.
+    linestyle = col in plotter.fast_cols ? :solid : :dash
     plot!(plt, unique_sizes, means;
         label = plotter.col2Name[col],
         marker = plotter.col2Marker[col],
         color = plotter.col2Color[col],
+        linestyle = linestyle,
         ribbon = cis,
         fillalpha = 0.2)
     return plt
@@ -336,8 +339,9 @@ function plot_result(csvfile)
         "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "expectation" => "E")
     col2Color = Dict("cvar" => :blue, "qcvar" => :blue, "var" => :green,
         "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "expectation" => :pink)
-    col2Marker = Dict("cvar" => :circle, "qcvar" => :star5, "var" => :rect,
-        "qvar" => :cross, "tvar" => :xcross, "qtvar" => :diamond, "expectation" => :pentagon)
+    # A method pair (standard/fast) shares both color and marker, e.g. CVaR/QCVaR.
+    col2Marker = Dict("cvar" => :circle, "qcvar" => :circle, "var" => :rect,
+        "qvar" => :rect, "tvar" => :diamond, "qtvar" => :diamond, "expectation" => :pentagon)
 
     # Columns: n, cvar, qcvar, var, qvar, tvar, qtvar, expectation
     df = CSV.File(csvfile) |> DataFrame
