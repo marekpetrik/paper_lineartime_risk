@@ -1,6 +1,15 @@
-module Benchmark
+# Benchmarks for the linear-time risk-measure algorithms in RiskMeasures.jl.
+#
+# This is a plain script (not a package). Activate the project environment and
+# `include` this file to get `benchmark_random`, `benchmark_stocks` and
+# `plot_result` in your session:
+#
+#     julia> using Pkg; Pkg.activate("."); Pkg.instantiate()
+#     julia> include("benchmark.jl")
+#
+# See README.md for full usage.
 
-include("worstcasel1.jl")
+include(joinpath(@__DIR__, "worstcasel1.jl"))
 
 using Base.Threads
 using Dates
@@ -14,37 +23,32 @@ using Statistics
 using Plots
 using PGFPlotsX
 
-# Backend activation and plot defaults mutate `Plots`/`PGFPlotsX`, so they must
-# run at load time (in __init__), not during precompilation.
-function __init__()
-    Random.seed!(1234)
+# --- Plotting / RNG setup (run once when this file is included) ---
+Random.seed!(1234)
 
-    # Use the PGFPlotsX backend (LaTeX) and set the font to LMRoman (Latin Modern Roman)
-    pgfplotsx()
-    push!(PGFPlotsX.CUSTOM_PREAMBLE, raw"\usepackage{lmodern}")
-    default(
-        fontfamily = "Latin Modern Roman",
-        titlefontsize = 18,
-        guidefontsize = 18,
-        tickfontsize = 18,
-        legendfontsize = 18,
-        size = (830, 600),
-        grid = true,
-    )
-end
+# Use the PGFPlotsX backend (LaTeX) and set the font to LMRoman (Latin Modern Roman)
+pgfplotsx()
+push!(PGFPlotsX.CUSTOM_PREAMBLE, raw"\usepackage{lmodern}")
+default(
+    fontfamily = "Latin Modern Roman",
+    titlefontsize = 18,
+    guidefontsize = 18,
+    tickfontsize = 18,
+    legendfontsize = 18,
+    size = (830, 600),
+    grid = true,
+)
 
 
 
 """
-    run_one_experiment(n::Int, x, p, α)
+    run_one_experiment(x, p, α)
 
-Run one experiment with n samples and random variable *x* with probability distribution 
+Run one experiment with random variable *x* with probability distribution
 *p* and risk level *α* and return the results.
 
 # Returns:
-  NTuple{2, Float64}:
-    slow_cvar_result: The CVaR time taken result.
-    fast_cvar_result: The qCVaR time taken result.
+  NamedTuple of measured times (in milliseconds) for each algorithm.
 """
 function run_one_experiment(x, p, α)
     # --- CVaR ---
@@ -69,7 +73,7 @@ function run_one_experiment(x, p, α)
     start = time_ns()
     RiskMeasures.VaR(tmpx, tmpp, α, check_inputs=false, fast=true).value
     qvar_time = (time_ns() - start) * 1e-6
-    # --- TVaR --- 
+    # --- TVaR ---
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     start = time_ns()
@@ -91,7 +95,7 @@ function run_one_experiment(x, p, α)
         println("Regular: $slow_cvar_result, Fast: $fast_cvar_result, diff: $δ")
         error("Results are not equal!")
     end
-    
+
     (slow_cvar_time=slow_time, fast_cvar_time=fast_time, var_time=var_time,
      qvar_time=qvar_time, tvar_time=tvar_time, qtvar_time=qtvar_time,
      expectation_time=expectation_time)
@@ -113,7 +117,7 @@ function p_gen_func(dist)
 end
 
 """
-    benchmark_random(trials = 10, start = Int(1e6), step = Int(1e6), stop = Int(1e7))
+    benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop = Int(1e7))
 
 Benchmark the risk-measure algorithms on randomly generated distributions.
 
@@ -139,7 +143,7 @@ function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop
     for dist in ["uniform", "sparse"]
         println("Running experiments for $dist")
         # returns a function that takes n and returns a probability distribution
-        p_f = p_gen_func(dist) 
+        p_f = p_gen_func(dist)
         # One experiment is running the CVaR and qCVaR algorithms and collecting the time taken.
         experiments = Int.(ceil.(range(start=start, stop=stop, step=step)))
         # need to "multiply" experiments vector by trials
@@ -179,7 +183,7 @@ function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop
 end
 
 """
-    benchmark_stocks(trials = 5, window = 10)
+    benchmark_stocks(; trials = 5, window = 10)
 
 Benchmark the risk-measure algorithms on distributions derived from real stock
 data.
@@ -200,7 +204,7 @@ A `DataFrame` with one row per trial and columns `n`, `cvar`, `qcvar`, `var`,
 milliseconds.
 """
 function benchmark_stocks(; trials=5, window = 10)
-    csv_path = joinpath(dirname(pathof(Benchmark)), "..", "data", "spy_data.csv")
+    csv_path = joinpath(@__DIR__, "data", "spy_data.csv")
 
     df = CSV.File(csv_path) |> DataFrame
     println("Data loaded")
@@ -222,7 +226,7 @@ function benchmark_stocks(; trials=5, window = 10)
         upper_return = μ + 4 * σ
         x = collect(range(lower_return, stop=upper_return, length=Int(1e4)))
 
-        shuffle!(x) 
+        shuffle!(x)
         dist = Normal(μ, σ)
 
         p = pdf.(dist, x)
@@ -272,7 +276,7 @@ function compute_cis_means(df::DataFrame, cols::Vector{String})
         for size in unique_sizes
             df_size = df[df.n .== size, :]
             vals = df_size[!, col]
-            ci = 1.96 * std(vals) / sqrt(length(vals)) 
+            ci = 1.96 * std(vals) / sqrt(length(vals))
             push!(cis, ci)
             push!(means, mean(vals))
         end
@@ -323,7 +327,7 @@ end
 """
     plot_result(csvfile)
 
-Loads a dataframe from a CSV file `csvfile` and plots it. 
+Loads a dataframe from a CSV file `csvfile` and plots it.
 """
 function plot_result(csvfile)
     slow = ["cvar", "var", "tvar"]
@@ -340,8 +344,3 @@ function plot_result(csvfile)
     plotter = Plotter(df, slow, fast, col2Name, col2Marker, col2Color)
     plot_all_slow_vs_fast(plotter)
 end
-
-
-export benchmark_random, benchmark_stocks, plot_result
-
-end # module Benchmark
