@@ -23,10 +23,10 @@ Optimal solution `p` and the objective value
 """
 function worstcase_l1(z::Vector{<:Real}, p̄::Vector{<:Real}, ξ::Real)
     (maximum(p̄) ≤ 1 + 1e-9 && minimum(p̄) ≥ -1e-9)  ||
-        "values must be between 0 and 1"
-    ξ ≥ zero(ξ)|| "ξ must be nonnegative"
+        error("values must be between 0 and 1")
+    ξ ≥ zero(ξ) || error("ξ must be nonnegative")
     (length(z) > 0 && length(z) == length(p̄)) ||
-            "z's values needs to be same length as p̄'s values"
+            error("z's values needs to be same length as p̄'s values")
     
     ξ = clamp(ξ, 0, 2)
     size = length(z)

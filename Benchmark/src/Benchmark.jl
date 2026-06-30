@@ -1,6 +1,6 @@
 module Benchmark
 
-include("worstcase_l1.jl")
+include("worstcasel1.jl")
 
 using Base.Threads
 using Dates
@@ -10,7 +10,30 @@ using Random
 using ProgressBars
 using Distributions
 using RiskMeasures
-Random.seed!(1234)
+using Statistics
+using Plots
+using PGFPlotsX
+
+# Backend activation and plot defaults mutate `Plots`/`PGFPlotsX`, so they must
+# run at load time (in __init__), not during precompilation.
+function __init__()
+    Random.seed!(1234)
+
+    # Use the PGFPlotsX backend (LaTeX) and set the font to LMRoman (Latin Modern Roman)
+    pgfplotsx()
+    push!(PGFPlotsX.CUSTOM_PREAMBLE, raw"\usepackage{lmodern}")
+    default(
+        fontfamily = "Latin Modern Roman",
+        titlefontsize = 18,
+        guidefontsize = 18,
+        tickfontsize = 18,
+        legendfontsize = 18,
+        size = (830, 600),
+        grid = true,
+    )
+end
+
+
 
 """
     run_one_experiment(n::Int, x, p, α)
@@ -24,6 +47,7 @@ Run one experiment with n samples and random variable *x* with probability distr
     fast_cvar_result: The qCVaR time taken result.
 """
 function run_one_experiment(x, p, α)
+    # --- CVaR ---
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     local start = time_ns()
@@ -34,6 +58,7 @@ function run_one_experiment(x, p, α)
     start = time_ns()
     fast_cvar_result = RiskMeasures.CVaR(tmpx, tmpp, α, check_inputs=false, fast=true).value
     fast_time = (time_ns() - start) * 1e-6
+    # --- VaR ---
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     start = time_ns()
@@ -44,24 +69,29 @@ function run_one_experiment(x, p, α)
     start = time_ns()
     RiskMeasures.VaR(tmpx, tmpp, α, check_inputs=false, fast=true).value
     qvar_time = (time_ns() - start) * 1e-6
+    # --- TVaR --- 
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     start = time_ns()
-    worstcase_l1(tmpx, tmpp, α)
+    worstcase_l1(tmpx, tmpp, 2*α)
     tvar_time = (time_ns() - start) * 1e-6
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     start = time_ns()
-    TVaR!(tmpx, tmpp, α)
+    choquet_ews(tmpx, tmpp, choquet_ews_tvar(α))
     qtvar_time = (time_ns() - start) * 1e-6
+    # --- Expect ---
     start = time_ns()
     expectation = sum(tmpx .* tmpp)
     expectation_time = (time_ns() - start) * 1e-6
-    local δ = abs(slow_cvar_result - fast_cvar_result)
+
+    # check correctness
+    δ = abs(slow_cvar_result - fast_cvar_result)
     if δ >= 1e-6
         println("Regular: $slow_cvar_result, Fast: $fast_cvar_result, diff: $δ")
         error("Results are not equal!")
     end
+    
     (slow_cvar_time=slow_time, fast_cvar_time=fast_time, var_time=var_time,
      qvar_time=qvar_time, tvar_time=tvar_time, qtvar_time=qtvar_time,
      expectation_time=expectation_time)
@@ -103,7 +133,7 @@ A `Dict` keyed by distribution name (`"uniform"` and `"sparse"`). Each value is 
 `qvar`, `tvar`, `qtvar` and `expectation` holding the measured times in
 milliseconds.
 """
-function benchmark_random(trials = 10, start = Int(1e6), step = Int(1e6), stop = Int(1e7))
+function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop = Int(1e7))
     println("Starting experiments")
     results = Dict()
     for dist in ["uniform", "sparse"]
@@ -169,7 +199,7 @@ A `DataFrame` with one row per trial and columns `n`, `cvar`, `qcvar`, `var`,
 `qvar`, `tvar`, `qtvar` and `expectation` holding the measured times in
 milliseconds.
 """
-function benchmark_stocks(trials=5, window = 10)
+function benchmark_stocks(; trials=5, window = 10)
     csv_path = joinpath(dirname(pathof(Benchmark)), "..", "data", "spy_data.csv")
 
     df = CSV.File(csv_path) |> DataFrame
@@ -214,6 +244,104 @@ function benchmark_stocks(trials=5, window = 10)
 end
 
 
-export benchmark_random, benchmark_stocks
+"""
+Wrapper struct that keeps track of a dataset and its info for plotting.
+"""
+struct Plotter
+    df::DataFrame
+    slow_cols::Vector{String}        # which cols are slow
+    fast_cols::Vector{String}        # which cols are fast
+    col2Name::Dict{String,String}    # column name to display on graph
+    col2Marker::Dict{String,Symbol}  # column name to marker
+    col2Color::Dict{String,Symbol}   # column name to color
+    CI::Dict{String,Tuple{Vector{Float64},Vector{Float64}}}  # (cis, means) per column
+end
+
+"""
+    compute_cis_means(df, cols)
+
+Compute the confidence intervals and means for each of `cols` over the unique
+values of `n`.
+"""
+function compute_cis_means(df::DataFrame, cols::Vector{String})
+    results = Dict{String,Tuple{Vector{Float64},Vector{Float64}}}()
+    unique_sizes = unique(df.n)
+    for col in cols
+        cis = Float64[]
+        means = Float64[]
+        for size in unique_sizes
+            df_size = df[df.n .== size, :]
+            vals = df_size[!, col]
+            ci = 1.96 * std(vals) / sqrt(length(vals)) 
+            push!(cis, ci)
+            push!(means, mean(vals))
+        end
+        results[col] = (cis, means)
+    end
+    return results
+end
+
+function Plotter(df, slow_cols, fast_cols, col2Name, col2Marker, col2Color)
+    CI = compute_cis_means(df, vcat(slow_cols, fast_cols))
+    Plotter(df, slow_cols, fast_cols, col2Name, col2Marker, col2Color, CI)
+end
+
+"""
+    plot_means_and_cis!(plt, plotter, col)
+
+Plot the mean line and a shaded confidence-interval ribbon for `col`.
+"""
+function plot_means_and_cis!(plt, plotter::Plotter, col::String)
+    unique_sizes = unique(plotter.df.n)
+    cis, means = plotter.CI[col]
+    plot!(plt, unique_sizes, means;
+        label = plotter.col2Name[col],
+        marker = plotter.col2Marker[col],
+        color = plotter.col2Color[col],
+        ribbon = cis,
+        fillalpha = 0.2)
+    return plt
+end
+
+"""
+    plot_all_slow_vs_fast(plotter)
+
+Plot the comparison between all slow and fast methods on log-log axes and return
+the plot object. Use `savefig` to write it to a file.
+"""
+function plot_all_slow_vs_fast(plotter::Plotter)
+    plt = plot()
+    for col in vcat(plotter.slow_cols, plotter.fast_cols)
+        plot_means_and_cis!(plt, plotter, col)
+    end
+    plot!(plt; xscale = :log10, yscale = :log10,
+        xlabel = "Size of Probability Space (n)", ylabel = "Time (ms)",
+        legend = :topleft)
+    return plt
+end
+
+"""
+    plot_result(csvfile)
+
+Loads a dataframe from a CSV file `csvfile` and plots it. 
+"""
+function plot_result(csvfile)
+    slow = ["cvar", "var", "tvar"]
+    fast = ["qcvar", "qvar", "qtvar", "expectation"]
+    col2Name = Dict("cvar" => "CVaR", "qcvar" => "QCVaR", "var" => "VaR",
+        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "expectation" => "E")
+    col2Color = Dict("cvar" => :blue, "qcvar" => :blue, "var" => :green,
+        "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "expectation" => :pink)
+    col2Marker = Dict("cvar" => :circle, "qcvar" => :star5, "var" => :rect,
+        "qvar" => :cross, "tvar" => :xcross, "qtvar" => :diamond, "expectation" => :pentagon)
+
+    # Columns: n, cvar, qcvar, var, qvar, tvar, qtvar, expectation
+    df = CSV.File(csvfile) |> DataFrame
+    plotter = Plotter(df, slow, fast, col2Name, col2Marker, col2Color)
+    plot_all_slow_vs_fast(plotter)
+end
+
+
+export benchmark_random, benchmark_stocks, plot_result
 
 end # module Benchmark
