@@ -32,6 +32,8 @@ end
 
 ### Generate Latex tables for the small datasets (saves them as tex)
 
+println("Generating small table")
 generate_tables("benchmark_random_small.csv")
+pritnln("Generating stocks table")
 generate_tables("benchmark_stocks.csv")
 
