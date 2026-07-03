@@ -14,7 +14,7 @@ if !isfile("benchmark_random_uniform.csv")
     end
 end
 
-if !isfile("benchmak_random_small.csv")
+if !isfile("benchmark_random_small.csv")
     results = benchmark_random(trials=10, start=1000,step=1000,stop=10000)
     CSV.write("benchmark_random_small.csv", results["sparse"])
 end
@@ -34,6 +34,7 @@ end
 
 println("Generating small table")
 generate_tables("benchmark_random_small.csv")
-pritnln("Generating stocks table")
+
+println("Generating stocks table")
 generate_tables("benchmark_stocks.csv")
 
