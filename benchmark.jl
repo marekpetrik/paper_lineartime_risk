@@ -23,6 +23,7 @@ using Statistics
 using Plots
 using PGFPlotsX
 using Latexify
+using Printf
 
 # --- Plotting / RNG setup (run once when this file is included) ---
 Random.seed!(1234)
@@ -351,8 +352,38 @@ function plot_result(csvfile)
 end
 
 
-function generate_table_small(csvfile)
+"""
+    generate_tables(csvfile)
+
+Generate LaTeX tables summarizing benchmark results stored in `csvfile`.
+
+The CSV file is expected to contain a column `n` (problem size) and one
+column per method (`expectation`, `var`, `qvar`, `cvar`, `qcvar`, `tvar`,
+`qtvar`) with one row per benchmark repetition. Rows are grouped by `n`
+and, for each method, the mean and the 95% confidence interval half-width
+(1.96 ⋅ std / √count) are computed.
+
+Two LaTeX (booktabs) tables are written next to the input file:
+- `<csvfile>_mean.tex`: mean runtimes
+- `<csvfile>_std.tex`: confidence interval half-widths
+"""
+function generate_tables(csvfile)
+    df = CSV.read(csvfile, DataFrame)
+
+    value_cols = setdiff(names(df), ["n"])
+    value_cols = ["expectation", "var", "qvar", "cvar", "qcvar", "tvar", "qtvar"]
+    df[!,value_cols]
+    grouped = groupby(df, :n)
+    
+    df_mean = combine(grouped, [col => (x -> @sprintf("%.2f", mean(x))) => "$(col)" for col ∈ value_cols]...)
+
+    df_conf = combine(grouped, [col => (x -> @sprintf("%.2f", std(x) * 1.96 / sqrt(length(x)))) =>
+        "$(col)" for col ∈ value_cols]...)
+
+    write(replace(csvfile, ".csv" => "_mean.tex"),
+          latexify(df_mean; env = :table, booktabs = true, latex = false, adjustment = :r))
+
+    write(replace(csvfile, ".csv" => "_std.tex") , 
+          latexify(df_conf; env = :table, booktabs = true, latex = false, adjustment = :r) )
 end
 
-function generate_table_stocks(csvfile)
-end

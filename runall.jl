@@ -30,28 +30,8 @@ for csvfile in filter(f -> endswith(f, ".csv"), readdir())
 end
 
 
-### Generate Latex tables
+### Generate Latex tables for the small datasets (saves them as tex)
 
+generate_tables("benchmark_random_small.csv")
+generate_tables("benchmark_stocks.csv")
 
-csvfile = "benchmark_random_small.csv"
-df = CSV.read(csvfile, DataFrame)
-
-value_cols = setdiff(names(df), ["n"])
-value_cols = ["expectation", "var", "qvar", "cvar", "qcvar", "tvar", "qtvar"]
-grouped = groupby(df, :n)
-
-df_mean = combine(grouped, [col => (x -> @sprintf("%.2f", mean(x))) => "$(col)" for col ∈ value_cols]...)
-
-df_conf = combine(grouped, [col => (x -> @sprintf("%.2f", std(x) * 1.96 / sqrt(length(x)))) =>
-    "$(col)" for col ∈ value_cols]...)
-
-write("small_mean.tex",
-      latexify(df_mean; env = :table, booktabs = true, latex = false, adjustment = :r,
-               head = names(df)) )
-
-write("small_std.tex", 
-      latexify(df_conf; env = :table, booktabs = true, latex = false, adjustment = :r,
-               head = names(df)) )
-
-
-### Write stocks results
