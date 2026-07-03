@@ -22,6 +22,7 @@ using RiskMeasures
 using Statistics
 using Plots
 using PGFPlotsX
+using Latexify
 
 # --- Plotting / RNG setup (run once when this file is included) ---
 Random.seed!(1234)
@@ -347,4 +348,11 @@ function plot_result(csvfile)
     df = CSV.File(csvfile) |> DataFrame
     plotter = Plotter(df, slow, fast, col2Name, col2Marker, col2Color)
     plot_all_slow_vs_fast(plotter)
+end
+
+
+function generate_table_small(csvfile)
+end
+
+function generate_table_stocks(csvfile)
 end
