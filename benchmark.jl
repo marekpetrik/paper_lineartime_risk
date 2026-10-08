@@ -322,32 +322,33 @@ function plot_means_and_cis!(plt, plotter::Plotter, col::String)
 end
 
 """
-    plot_all_slow_vs_fast(plotter)
+    plot_all_slow_vs_fast(plotter; xlabel = "Size of Probability Space (n)")
 
 Plot the comparison between all slow and fast methods on log-log axes and return
 the plot object. Use `savefig` to write it to a file.
 """
-function plot_all_slow_vs_fast(plotter::Plotter)
+function plot_all_slow_vs_fast(plotter::Plotter; xlabel = "Size of Probability Space (n)")
     plt = plot()
     for col in vcat(plotter.slow_cols, plotter.fast_cols)
         plot_means_and_cis!(plt, plotter, col)
     end
     plot!(plt; xscale = :log10, yscale = :log10,
-        xlabel = "Size of Probability Space (n)", ylabel = "Time (ms)",
+        xlabel = xlabel, ylabel = "Time (ms)",
         legend = :topleft)
     return plt
 end
 
 """
-    plot_result(csvfile)
+    plot_result(csvfile; xlabel = "Size of Probability Space (n)")
 
-Loads a dataframe from a CSV file `csvfile` and plots it.
+Loads a dataframe from a CSV file `csvfile` and plots it. Methods whose columns
+are missing from the CSV are skipped.
 """
-function plot_result(csvfile)
+function plot_result(csvfile; xlabel = "Size of Probability Space (n)")
     slow = ["cvar", "var", "tvar"]
     fast = ["qcvar", "qvar", "qtvar", "expectation", "partial_sort_general_time"]
     col2Name = Dict("cvar" => "CVaR", "qcvar" => "QCVaR", "var" => "VaR",
-        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "partial_sort_general_time" => "partial!", "expectation" => "E")
+        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "partial_sort_general_time" => "PVaR", "expectation" => "E")
     col2Color = Dict("cvar" => :blue, "qcvar" => :blue, "var" => :green,
         "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "partial_sort_general_time" => :black, "expectation" => :pink)
     # A method pair (standard/fast) shares both color and marker, e.g. CVaR/QCVaR.
@@ -356,8 +357,10 @@ function plot_result(csvfile)
 
     # Columns: n, cvar, qcvar, var, qvar, tvar, qtvar, expectation
     df = CSV.File(csvfile) |> DataFrame
+    slow = filter(in(names(df)), slow)
+    fast = filter(in(names(df)), fast)
     plotter = Plotter(df, slow, fast, col2Name, col2Marker, col2Color)
-    plot_all_slow_vs_fast(plotter)
+    plot_all_slow_vs_fast(plotter; xlabel = xlabel)
 end
 
 
@@ -379,9 +382,7 @@ Two LaTeX (booktabs) tables are written next to the input file:
 function generate_tables(csvfile)
     df = CSV.read(csvfile, DataFrame)
 
-    value_cols = setdiff(names(df), ["n"])
     value_cols = ["expectation", "var", "qvar", "cvar", "qcvar", "tvar", "qtvar"]
-    df[!,value_cols]
     grouped = groupby(df, :n)
     
     df_mean = combine(grouped, [col => (x -> @sprintf("%.2f", mean(x))) => "$(col)" for col ∈ value_cols]...)
@@ -392,7 +393,7 @@ function generate_tables(csvfile)
     write(replace(csvfile, ".csv" => "_mean.tex"),
           latexify(df_mean; env = :table, booktabs = true, latex = false, adjustment = :r))
 
-    write(replace(csvfile, ".csv" => "_std.tex") , 
+    write(replace(csvfile, ".csv" => "_std.tex"), 
           latexify(df_conf; env = :table, booktabs = true, latex = false, adjustment = :r) )
 end
 

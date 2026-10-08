@@ -1,4 +1,5 @@
 include("benchmark.jl")
+include("risk_averse_value_iteration.jl")
 
 ###
 
@@ -19,13 +20,22 @@ if !isfile("benchmark_random_small.csv")
     CSV.write("benchmark_random_small.csv", results["sparse"])
 end
 
+### Generate the reinforcement learning results
+
+if !isfile("benchmark_value_iteration.csv")
+    df = benchmark_value_iteration()
+    CSV.write("benchmark_value_iteration.csv", df)
+end
+
 println("Plotting!")
 
 ### Plot every benchmark CSV in the directory
 for csvfile in filter(f -> endswith(f, ".csv"), readdir())
     println("Plotting $csvfile")
     csvfile == "benchmark_stocks.csv" && continue   # skip stocks
-    plt = plot_result(csvfile)
+    xlabel = csvfile == "benchmark_value_iteration.csv" ? "Number of States" :
+                                                          "Size of Probability Space (n)"
+    plt = plot_result(csvfile; xlabel = xlabel)
     savefig(plt, replace(csvfile, ".csv" => ".pdf"))
 end
 
@@ -38,3 +48,5 @@ generate_tables("benchmark_random_small.csv")
 println("Generating stocks table")
 generate_tables("benchmark_stocks.csv")
 
+println("Generating value iteration table")
+generate_tables("benchmark_value_iteration.csv")

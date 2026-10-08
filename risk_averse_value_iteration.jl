@@ -1,10 +1,13 @@
-# implement risk averse nested cvar / var
+# Benchmark of risk-averse (nested) value iteration on an inventory MDP.
+#
+# This is a plain script (not a package). `include` it to get
+# `benchmark_value_iteration` in your session; it is run from `runall.jl`.
+# See README.md for full usage.
+
 using MDPs
 using Base.Threads
 using RiskMeasures
-using CSV
-using Plots
-using Statistics
+using DataFrames
 using ProgressBars
 using LinearAlgebra
 include(joinpath(@__DIR__, "worstcasel1.jl"))
@@ -43,9 +46,6 @@ function create_inventory_domain(target_state_count::Int)
 
   return MDPs.Domains.Inventory.Model(params)
 end
-
-mdp = create_inventory_domain(400)
-
 
 # Assuming the risk measure function signature is: ρ(X, P, α) 
 # where X is the vector of values, P is the vector of probabilities, and α is the risk parameter.
@@ -115,150 +115,71 @@ function multi_alpha_nestVi(mdp, T::Int, alphas::Vector{Float64}, γ::Float64, �
   return (value_function=v, policy=π, alphas=alphas)
 end
 
+"""
+    benchmark_nestVi(mdp, T, alphas, γ)
+
+Run nested value iteration on `mdp` once with each risk measure and return a
+NamedTuple of the measured times (in milliseconds), keyed by the same column
+names as `run_one_experiment` in `benchmark.jl`.
+"""
 function benchmark_nestVi(mdp, T::Int, alphas::Vector{Float64}, γ::Float64)
-  # --- CVaR (Fast) ---
-  start = time_ns()
-  res_cvar_fast = multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    (X, P, α) -> RiskMeasures.CVaR!(X, P, α, check_inputs=false, fast=true).value
+  risk_measures = (
+    qcvar=(X, P, α) -> RiskMeasures.CVaR!(X, P, α, check_inputs=false, fast=true).value,
+    cvar=(X, P, α) -> RiskMeasures.CVaR!(X, P, α, check_inputs=false, fast=false).value,
+    var=(X, P, α) -> RiskMeasures.VaR!(X, P, α, check_inputs=false, fast=false).value,
+    qvar=(X, P, α) -> RiskMeasures.VaR!(X, P, α, check_inputs=false, fast=true).value,
+    tvar=(X, P, α) -> worstcase_l1(X, P, 2 * α)[2],
+    qtvar=(X, P, α) -> choquet_ews(X, P, choquet_ews_tvar(α)).value,
+    expectation=(X, P, α) -> dot(X, P),
   )
-  fast_cvar_time = (time_ns() - start) * 1e-6
 
-  # --- CVaR (Slow) ---
-  start = time_ns()
-  res_cvar_slow = multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    (X, P, α) -> RiskMeasures.CVaR!(X, P, α, check_inputs=false, fast=false).value
-  )
-  slow_cvar_time = (time_ns() - start) * 1e-6
-
-  # --- VaR (Slow) ---
-  start = time_ns()
-  multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    (X, P, α) -> RiskMeasures.VaR!(X, P, α, check_inputs=false, fast=false).value
-  )
-  var_time = (time_ns() - start) * 1e-6
-
-  # --- VaR (Fast) ---
-  start = time_ns()
-  multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    (X, P, α) -> RiskMeasures.VaR!(X, P, α, check_inputs=false, fast=true).value
-  )
-  qvar_time = (time_ns() - start) * 1e-6
-
-  # --- TVaR (worstcase_l1) ---
-  start = time_ns()
-  multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    # Wraps the raw float output in a NamedTuple so .value extraction works
-    (X, P, α) -> worstcase_l1(X, P, 2 * α)[2],
-  )
-  tvar_time = (time_ns() - start) * 1e-6
-
-  # --- TVaR (choquet_ews) ---
-  start = time_ns()
-  multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    (X, P, α) -> choquet_ews(X, P, choquet_ews_tvar(α)).value,
-  )
-  qtvar_time = (time_ns() - start) * 1e-6
-
-  # --- Expectation ---
-  start = time_ns()
-  multi_alpha_nestVi(
-    mdp, T, alphas, γ,
-    (X, P, α) -> dot(X, P),
-  )
-  expectation_time = (time_ns() - start) * 1e-6
+  times = Dict{Symbol,Float64}()
+  values = Dict{Symbol,Matrix{Float64}}()
+  for (name, ρ) in pairs(risk_measures)
+    start = time_ns()
+    res = multi_alpha_nestVi(mdp, T, alphas, γ, ρ)
+    times[name] = (time_ns() - start) * 1e-6
+    values[name] = res.value_function[1]
+  end
 
   # --- Correctness Check ---
   # Compares the final value functions (at t=1) for slow vs fast CVaR
-  δ = maximum(abs.(res_cvar_slow.value_function[1] .- res_cvar_fast.value_function[1]))
+  δ = maximum(abs.(values[:cvar] .- values[:qcvar]))
   if δ >= 1e-6
     println("Max diff: $δ")
     error("Results are not equal between slow and fast CVaR!")
   end
 
-  return (
-    slow_cvar_time=slow_cvar_time,
-    fast_cvar_time=fast_cvar_time,
-    var_time=var_time,
-    qvar_time=qvar_time,
-    tvar_time=tvar_time,
-    qtvar_time=qtvar_time,
-    expectation_time=expectation_time
-  )
+  return (; (name => times[name] for name in keys(risk_measures))...)
 end
 
-function benchmark_multiple_trials(mdp, T::Int, alphas::Vector{Float64}, γ::Float64; trials::Int=10)
-  methods = [
-    :slow_cvar_time, :fast_cvar_time,
-    :var_time, :qvar_time,
-    :tvar_time, :qtvar_time,
-    :expectation_time
-  ]
+"""
+    benchmark_value_iteration(; trials = 10, states = [50, 100, 200, 400], T = 10,
+                                alphas = collect(0.0:0.1:1.0), γ = 0.95)
 
-  # Preallocate a dictionary to store trial results
-  results = Dict{Symbol,Vector{Float64}}(m => Float64[] for m in methods)
+Benchmark risk-averse nested value iteration on inventory MDPs.
 
-  println("Running $trials benchmark trials...")
+For each state count in `states`, builds an inventory domain with
+`create_inventory_domain` and times `T` steps of nested value iteration for all
+risk levels in `alphas` with each risk measure (CVaR, qCVaR, VaR, qVaR, TVaR,
+qTVaR and the plain expectation), repeating each `trials` times (a warm-up run is
+performed first and discarded).
 
-  # Wrap the loop iterator in ProgressBar
-  benchmark_nestVi(mdp, T, alphas, γ) # burn one for julia
-  for i in ProgressBar(1:trials)
-    trial_res = benchmark_nestVi(mdp, T, alphas, γ)
-    for m in methods
-      push!(results[m], getproperty(trial_res, m))
+# Returns
+A `DataFrame` with one row per trial and columns `n` (number of states), `cvar`,
+`qcvar`, `var`, `qvar`, `tvar`, `qtvar` and `expectation` holding the measured
+times in milliseconds.
+"""
+function benchmark_value_iteration(; trials=10, states=[50, 100, 200, 400], T=10,
+                                   alphas=collect(0.0:0.1:1.0), γ=0.95)
+  results = DataFrame()
+  for n in states
+    println("Running value iteration with $n states")
+    mdp = create_inventory_domain(n)
+    benchmark_nestVi(mdp, T, alphas, γ) # burn one for julia
+    for _ in ProgressBar(1:trials)
+      push!(results, merge((n=n,), benchmark_nestVi(mdp, T, alphas, γ)))
     end
   end
-
-  # Compute mean and standard deviation
-  stats = Dict{Symbol,Tuple{Float64,Float64}}()
-  for m in methods
-    stats[m] = (mean(results[m]), std(results[m]))
-  end
-
-  # Print a markdown table of the computed statistics to the console
-  println("\n| Method | Mean Time (ms) | Std Dev (ms) |")
-  println("| :--- | :--- | :--- |")
-  println("| CVaR (Slow) | $(round(stats[:slow_cvar_time][1], digits=2)) | $(round(stats[:slow_cvar_time][2], digits=2)) |")
-  println("| CVaR (Fast) | $(round(stats[:fast_cvar_time][1], digits=2)) | $(round(stats[:fast_cvar_time][2], digits=2)) |")
-  println("| VaR (Slow) | $(round(stats[:var_time][1], digits=2)) | $(round(stats[:var_time][2], digits=2)) |")
-  println("| VaR (Fast) | $(round(stats[:qvar_time][1], digits=2)) | $(round(stats[:qvar_time][2], digits=2)) |")
-  println("| TVaR (Slow/L1) | $(round(stats[:tvar_time][1], digits=2)) | $(round(stats[:tvar_time][2], digits=2)) |")
-  println("| TVaR (Fast/Choquet) | $(round(stats[:qtvar_time][1], digits=2)) | $(round(stats[:qtvar_time][2], digits=2)) |")
-  println("| Expectation | $(round(stats[:expectation_time][1], digits=2)) | $(round(stats[:expectation_time][2], digits=2)) |")
-
-  # Generate the Plot
-  p = plot(
-    title="Execution Time over $trials Trials",
-    xlabel="Trial Number",
-    ylabel="Time (ms)",
-    legend=:outertopright,
-    size=(800, 500),
-    margin=5Plots.mm
-  )
-
-  x_axis = 1:trials
-
-  # Add series to plot (Dotted for Slow, Solid for Fast)
-  plot!(p, x_axis, results[:slow_cvar_time], label="CVaR (Slow)", ls=:dot, lw=2, color=:red)
-  plot!(p, x_axis, results[:fast_cvar_time], label="CVaR (Fast)", ls=:solid, lw=2, color=:red)
-
-  plot!(p, x_axis, results[:var_time], label="VaR (Slow)", ls=:dot, lw=2, color=:blue)
-  plot!(p, x_axis, results[:qvar_time], label="VaR (Fast)", ls=:solid, lw=2, color=:blue)
-
-  plot!(p, x_axis, results[:tvar_time], label="TVaR (Slow/L1)", ls=:dot, lw=2, color=:green)
-  plot!(p, x_axis, results[:qtvar_time], label="TVaR (Fast/Choquet)", ls=:solid, lw=2, color=:green)
-
-  plot!(p, x_axis, results[:expectation_time], label="Expectation", ls=:solid, lw=2, color=:black)
-
-  return stats, p
+  return select(results, :n, :cvar, :qcvar, :var, :qvar, :tvar, :qtvar, :expectation)
 end
-
-# Execution
-alphas = collect(0.0:0.1:1.0)
-stats_summary, final_plot = benchmark_multiple_trials(mdp, 10, alphas, 0.95, trials=10)
-savefig(final_plot, "benchmark_results.png")
