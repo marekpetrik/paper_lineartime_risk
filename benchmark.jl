@@ -91,8 +91,8 @@ function run_one_experiment(x, p, α)
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     start = time_ns()
-    partial_sort_general!(tmpx, tmpp, α)
-    partial_sort_general_time = (time_ns() - start) * 1e-6
+    PVaR!(tmpx, tmpp, α)
+    pvar_time = (time_ns() - start) * 1e-6
     # --- Expect ---
     start = time_ns()
     expectation = sum(tmpx .* tmpp)
@@ -107,7 +107,7 @@ function run_one_experiment(x, p, α)
 
     (slow_cvar_time=slow_time, fast_cvar_time=fast_time, var_time=var_time,
         qvar_time=qvar_time, tvar_time=tvar_time, qtvar_time=qtvar_time,
-        partial_sort_general_time=partial_sort_general_time, expectation_time=expectation_time)
+        pvar_time=pvar_time, expectation_time=expectation_time)
 end
 
 function p_gen_func(dist)
@@ -164,7 +164,7 @@ function benchmark_random(; trials=10, start=Int(1e6), step=Int(1e6), stop=Int(1
         qvar_results = zeros(Float64, len)
         tvar_results = zeros(Float64, len)
         qtvar_results = zeros(Float64, len)
-        psg_results = zeros(Float64, len)
+        pvar_results = zeros(Float64, len)
         expectation_results = zeros(Float64, len)
         for i ∈ ProgressBar(1:len)
             GC.enable(false)
@@ -172,14 +172,14 @@ function benchmark_random(; trials=10, start=Int(1e6), step=Int(1e6), stop=Int(1
             x = rand(Float64, n) .* 100
             p = p_f(n)
             α = 0.95 + 1e-6
-            c, qc, v, qv, t, qt, psg, e = run_one_experiment(x, p, α)
+            c, qc, v, qv, t, qt, pv, e = run_one_experiment(x, p, α)
             cvar_results[i] = c
             qcvar_results[i] = qc
             var_results[i] = v
             qvar_results[i] = qv
             tvar_results[i] = t
             qtvar_results[i] = qt
-            psg_results[i] = psg
+            pvar_results[i] = pv
             expectation_results[i] = e
             GC.enable(true)
             x = nothing
@@ -188,7 +188,7 @@ function benchmark_random(; trials=10, start=Int(1e6), step=Int(1e6), stop=Int(1
         end
         results[dist] = DataFrame(n=experiments, cvar=cvar_results, qcvar=qcvar_results,
             var=var_results, qvar=qvar_results, tvar=tvar_results,
-            qtvar=qtvar_results, partial_sort_general_time=psg_results, expectation=expectation_results)
+            qtvar=qtvar_results, pvar=pvar_results, expectation=expectation_results)
     end
     return results
 end
@@ -221,7 +221,7 @@ function benchmark_stocks(; trials=5, window=10)
     println("Data loaded")
     println("Number of rows: ", size(df, 1))
     results =
-        Vector{NamedTuple{(:n, :cvar, :qcvar, :var, :qvar, :tvar, :qtvar, :partial_sort_general_time, :expectation),
+        Vector{NamedTuple{(:n, :cvar, :qcvar, :var, :qvar, :tvar, :qtvar, :pvar, :expectation),
             Tuple{Int64,Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64}}}()
     for i in ProgressBar(range(1, stop=size(df, 1)))
         GC.enable(false)
@@ -247,8 +247,8 @@ function benchmark_stocks(; trials=5, window=10)
         # Run the experiment 'trials' times to get a better estimate of the time
         run_one_experiment(x, p, α) # burn one for julia
         for j in 1:trials
-            c, qc, v, qv, t, qt, psg, e = run_one_experiment(x, p, α)
-            push!(results, (n=i, cvar=c, qcvar=qc, var=v, qvar=qv, tvar=t, qtvar=qt, partial_sort_general_time=psg, expectation=e))
+            c, qc, v, qv, t, qt, pv, e = run_one_experiment(x, p, α)
+            push!(results, (n=i, cvar=c, qcvar=qc, var=v, qvar=qv, tvar=t, qtvar=qt, pvar=pv, expectation=e))
         end
         GC.enable(true)
         x = nothing
@@ -372,14 +372,14 @@ are missing from the CSV are skipped. Returns a named tuple of plot objects.
 """
 function plot_result(csvfile; xlabel="Size of Probability Space (n)")
     slow = ["cvar", "var", "tvar"]
-    fast = ["qcvar", "qvar", "qtvar", "expectation", "partial_sort_general_time"]
+    fast = ["qcvar", "qvar", "qtvar", "expectation", "pvar"]
     col2Name = Dict("cvar" => "CVaR", "qcvar" => "QCVaR", "var" => "VaR",
-        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "partial_sort_general_time" => "PVaR", "expectation" => "E")
+        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "pvar" => "PVaR", "expectation" => "E")
     col2Color = Dict("cvar" => :blue, "qcvar" => :blue, "var" => :green,
-        "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "partial_sort_general_time" => :black, "expectation" => :pink)
+        "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "pvar" => :black, "expectation" => :pink)
     # A method pair (standard/fast) shares both color and marker, e.g. CVaR/QCVaR.
     col2Marker = Dict("cvar" => :circle, "qcvar" => :circle, "var" => :rect,
-        "qvar" => :rect, "tvar" => :diamond, "qtvar" => :diamond, "partial_sort_general_time" => :square, "expectation" => :pentagon)
+        "qvar" => :rect, "tvar" => :diamond, "qtvar" => :diamond, "pvar" => :square, "expectation" => :pentagon)
 
     # Columns: n, cvar, qcvar, var, qvar, tvar, qtvar, expectation
     df = CSV.File(csvfile) |> DataFrame
