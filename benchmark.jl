@@ -33,13 +33,13 @@ Random.seed!(1234)
 pgfplotsx()
 push!(PGFPlotsX.CUSTOM_PREAMBLE, raw"\usepackage{lmodern}")
 default(
-    fontfamily = "Latin Modern Roman",
-    titlefontsize = 18,
-    guidefontsize = 18,
-    tickfontsize = 18,
-    legendfontsize = 18,
-    size = (830, 600),
-    grid = true,
+    fontfamily="Latin Modern Roman",
+    titlefontsize=18,
+    guidefontsize=18,
+    tickfontsize=18,
+    legendfontsize=18,
+    size=(830, 600),
+    grid=true,
 )
 
 
@@ -91,8 +91,8 @@ function run_one_experiment(x, p, α)
     tmpx = deepcopy(x)
     tmpp = deepcopy(p)
     start = time_ns()
-    partial_sort_general!(tmpx, tmpp, α)
-    partial_sort_general_time = (time_ns() - start) *1e-6
+    PVaR!(tmpx, tmpp, α)
+    pvar_time = (time_ns() - start) * 1e-6
     # --- Expect ---
     start = time_ns()
     expectation = sum(tmpx .* tmpp)
@@ -106,8 +106,8 @@ function run_one_experiment(x, p, α)
     end
 
     (slow_cvar_time=slow_time, fast_cvar_time=fast_time, var_time=var_time,
-     qvar_time=qvar_time, tvar_time=tvar_time, qtvar_time=qtvar_time, 
-     partial_sort_general_time=partial_sort_general_time, expectation_time=expectation_time)
+        qvar_time=qvar_time, tvar_time=tvar_time, qtvar_time=qtvar_time,
+        pvar_time=pvar_time, expectation_time=expectation_time)
 end
 
 function p_gen_func(dist)
@@ -120,7 +120,7 @@ function p_gen_func(dist)
             p[inds] .= 1 / length(inds)
             p
         end
-  else
+    else
         error("Unknown distribution")
     end
 end
@@ -146,7 +146,7 @@ A `Dict` keyed by distribution name (`"uniform"` and `"sparse"`). Each value is 
 `qvar`, `tvar`, `qtvar` and `expectation` holding the measured times in
 milliseconds.
 """
-function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop = Int(1e7))
+function benchmark_random(; trials=10, start=Int(1e6), step=Int(1e6), stop=Int(1e7))
     println("Starting experiments")
     results = Dict()
     for dist in ["uniform", "sparse"]
@@ -164,7 +164,7 @@ function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop
         qvar_results = zeros(Float64, len)
         tvar_results = zeros(Float64, len)
         qtvar_results = zeros(Float64, len)
-        psg_results = zeros(Float64, len)
+        pvar_results = zeros(Float64, len)
         expectation_results = zeros(Float64, len)
         for i ∈ ProgressBar(1:len)
             GC.enable(false)
@@ -172,14 +172,14 @@ function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop
             x = rand(Float64, n) .* 100
             p = p_f(n)
             α = 0.95 + 1e-6
-            c, qc, v, qv, t, qt, psg, e = run_one_experiment(x, p, α)
+            c, qc, v, qv, t, qt, pv, e = run_one_experiment(x, p, α)
             cvar_results[i] = c
             qcvar_results[i] = qc
             var_results[i] = v
             qvar_results[i] = qv
             tvar_results[i] = t
             qtvar_results[i] = qt
-            psg_results[i] = psg
+            pvar_results[i] = pv
             expectation_results[i] = e
             GC.enable(true)
             x = nothing
@@ -187,8 +187,8 @@ function benchmark_random(; trials = 10, start = Int(1e6), step = Int(1e6), stop
             GC.gc()
         end
         results[dist] = DataFrame(n=experiments, cvar=cvar_results, qcvar=qcvar_results,
-                         var=var_results, qvar=qvar_results, tvar=tvar_results,
-                         qtvar=qtvar_results, partial_sort_general_time=psg_results, expectation=expectation_results)
+            var=var_results, qvar=qvar_results, tvar=tvar_results,
+            qtvar=qtvar_results, pvar=pvar_results, expectation=expectation_results)
     end
     return results
 end
@@ -214,15 +214,15 @@ A `DataFrame` with one row per trial and columns `n`, `cvar`, `qcvar`, `var`,
 `qvar`, `tvar`, `qtvar` and `expectation` holding the measured times in
 milliseconds.
 """
-function benchmark_stocks(; trials=5, window = 10)
+function benchmark_stocks(; trials=5, window=10)
     csv_path = joinpath(@__DIR__, "data", "spy_data.csv")
 
     df = CSV.File(csv_path) |> DataFrame
     println("Data loaded")
     println("Number of rows: ", size(df, 1))
     results =
-        Vector{NamedTuple{(:n, :cvar, :qcvar, :var, :qvar, :tvar, :qtvar, :partial_sort_general_time, :expectation),
-                          Tuple{Int64,Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64}}}()
+        Vector{NamedTuple{(:n, :cvar, :qcvar, :var, :qvar, :tvar, :qtvar, :pvar, :expectation),
+            Tuple{Int64,Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64}}}()
     for i in ProgressBar(range(1, stop=size(df, 1)))
         GC.enable(false)
 
@@ -247,8 +247,8 @@ function benchmark_stocks(; trials=5, window = 10)
         # Run the experiment 'trials' times to get a better estimate of the time
         run_one_experiment(x, p, α) # burn one for julia
         for j in 1:trials
-            c, qc, v, qv, t, qt, psg, e = run_one_experiment(x, p, α)
-            push!(results, (n=i, cvar=c, qcvar=qc, var=v, qvar=qv, tvar=t, qtvar=qt, partial_sort_general_time=psg, expectation=e))
+            c, qc, v, qv, t, qt, pv, e = run_one_experiment(x, p, α)
+            push!(results, (n=i, cvar=c, qcvar=qc, var=v, qvar=qv, tvar=t, qtvar=qt, pvar=pv, expectation=e))
         end
         GC.enable(true)
         x = nothing
@@ -312,12 +312,12 @@ function plot_means_and_cis!(plt, plotter::Plotter, col::String)
     # Fast methods are drawn with a solid line, standard ones with a dashed line.
     linestyle = col in plotter.fast_cols ? :solid : :dash
     plot!(plt, unique_sizes, means;
-        label = plotter.col2Name[col],
-        marker = plotter.col2Marker[col],
-        color = plotter.col2Color[col],
-        linestyle = linestyle,
-        ribbon = cis,
-        fillalpha = 0.2)
+        label=plotter.col2Name[col],
+        marker=plotter.col2Marker[col],
+        color=plotter.col2Color[col],
+        linestyle=linestyle,
+        ribbon=cis,
+        fillalpha=0.2)
     return plt
 end
 
@@ -327,14 +327,40 @@ end
 Plot the comparison between all slow and fast methods on log-log axes and return
 the plot object. Use `savefig` to write it to a file.
 """
-function plot_all_slow_vs_fast(plotter::Plotter; xlabel = "Size of Probability Space (n)")
+function plot_all_slow_vs_fast(plotter::Plotter; xlabel="Size of Probability Space (n)")
     plt = plot()
     for col in vcat(plotter.slow_cols, plotter.fast_cols)
         plot_means_and_cis!(plt, plotter, col)
     end
-    plot!(plt; xscale = :log10, yscale = :log10,
-        xlabel = xlabel, ylabel = "Time (ms)",
-        legend = :topleft)
+    plot!(plt; xscale=:log10, yscale=:log10,
+        xlabel=xlabel, ylabel="Time (ms)",
+        legend=:topleft)
+    return plt
+end
+
+"""
+Plot the relative comparison between all slow and fast methods on log axes and return the plot object. Relative here means the % speedup of the fast method over the slow method.
+"""
+function plot_relative_slow_vs_fast(plotter::Plotter; xlabel="Size of Probability Space (n)")
+    plt = plot()
+    for col in plotter.slow_cols
+        fast_col = "q" * col
+        if fast_col in plotter.fast_cols
+            slow_cis, slow_means = plotter.CI[col]
+            fast_cis, fast_means = plotter.CI[fast_col]
+            rel_means = (slow_means .- fast_means) ./ slow_means .* 100
+            rel_cis = sqrt.(slow_cis .^ 2 .+ fast_cis .^ 2) ./ slow_means .* 100
+            linestyle = :solid
+            plot!(plt, unique(plotter.df.n), rel_means;
+                label="$(plotter.col2Name[col]) vs $(plotter.col2Name[fast_col])",
+                marker=plotter.col2Marker[col],
+                color=plotter.col2Color[col],
+                linestyle=linestyle,
+                ribbon=rel_cis,
+                fillalpha=0.2)
+        end
+    end
+    plot!(plt; xscale=:log10, xlabel=xlabel, ylabel="Relative Speedup (%)", legend=:topleft)
     return plt
 end
 
@@ -342,27 +368,39 @@ end
     plot_result(csvfile; xlabel = "Size of Probability Space (n)")
 
 Loads a dataframe from a CSV file `csvfile` and plots it. Methods whose columns
-are missing from the CSV are skipped.
+are missing from the CSV are skipped. Returns a named tuple of plot objects.
 """
-function plot_result(csvfile; xlabel = "Size of Probability Space (n)")
+function plot_result(csvfile; xlabel="Size of Probability Space (n)")
     slow = ["cvar", "var", "tvar"]
-    fast = ["qcvar", "qvar", "qtvar", "expectation", "partial_sort_general_time"]
+    fast = ["qcvar", "qvar", "qtvar", "expectation", "pvar"]
     col2Name = Dict("cvar" => "CVaR", "qcvar" => "QCVaR", "var" => "VaR",
-        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "partial_sort_general_time" => "PVaR", "expectation" => "E")
+        "qvar" => "QVaR", "tvar" => "TVaR", "qtvar" => "QTVaR", "pvar" => "PVaR", "expectation" => "E")
     col2Color = Dict("cvar" => :blue, "qcvar" => :blue, "var" => :green,
-        "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "partial_sort_general_time" => :black, "expectation" => :pink)
+        "qvar" => :green, "tvar" => :purple, "qtvar" => :purple, "pvar" => :black, "expectation" => :pink)
     # A method pair (standard/fast) shares both color and marker, e.g. CVaR/QCVaR.
     col2Marker = Dict("cvar" => :circle, "qcvar" => :circle, "var" => :rect,
-        "qvar" => :rect, "tvar" => :diamond, "qtvar" => :diamond, "partial_sort_general_time" => :square, "expectation" => :pentagon)
+        "qvar" => :rect, "tvar" => :diamond, "qtvar" => :diamond, "pvar" => :square, "expectation" => :pentagon)
 
     # Columns: n, cvar, qcvar, var, qvar, tvar, qtvar, expectation
     df = CSV.File(csvfile) |> DataFrame
     slow = filter(in(names(df)), slow)
     fast = filter(in(names(df)), fast)
     plotter = Plotter(df, slow, fast, col2Name, col2Marker, col2Color)
-    plot_all_slow_vs_fast(plotter; xlabel = xlabel)
+    return (relative=plot_relative_slow_vs_fast(plotter; xlabel=xlabel),
+        absolute=plot_all_slow_vs_fast(plotter; xlabel=xlabel))
 end
 
+"""
+    plot_and_save_results(csvfile; xlabel = "Size of Probability Space (n)")
+
+Load a CSV file `csvfile`, plot the results, and save the plots as PDF files
+next to the CSV file. The absolute plot is saved as `<csvfile>_absolute.pdf`, and the relative plot is saved as `<csvfile>_relative.pdf`.
+"""
+function plot_and_save_results(csvfile; xlabel="Size of Probability Space (n)")
+    plots = plot_result(csvfile; xlabel=xlabel)
+    savefig(plots.absolute, replace(csvfile, ".csv" => ".pdf"))
+    savefig(plots.relative, replace(csvfile, ".csv" => "_relative.pdf"))
+end
 
 """
     generate_tables(csvfile)
@@ -384,16 +422,15 @@ function generate_tables(csvfile)
 
     value_cols = ["expectation", "var", "qvar", "cvar", "qcvar", "tvar", "qtvar"]
     grouped = groupby(df, :n)
-    
+
     df_mean = combine(grouped, [col => (x -> @sprintf("%.2f", mean(x))) => "$(col)" for col ∈ value_cols]...)
 
-    df_conf = combine(grouped, [col => (x -> @sprintf("%.2f", std(x) * 1.96 / sqrt(length(x)))) =>
-        "$(col)" for col ∈ value_cols]...)
+    df_conf = combine(grouped, [col => (x -> @sprintf("%.2f", std(x) * 1.96 / sqrt(length(x)))) => "$(col)" for col ∈ value_cols]...)
 
     write(replace(csvfile, ".csv" => "_mean.tex"),
-          latexify(df_mean; env = :table, booktabs = true, latex = false, adjustment = :r))
+        latexify(df_mean; env=:table, booktabs=true, latex=false, adjustment=:r))
 
-    write(replace(csvfile, ".csv" => "_std.tex"), 
-          latexify(df_conf; env = :table, booktabs = true, latex = false, adjustment = :r) )
+    write(replace(csvfile, ".csv" => "_std.tex"),
+        latexify(df_conf; env=:table, booktabs=true, latex=false, adjustment=:r))
 end
 

@@ -16,7 +16,7 @@ if !isfile("benchmark_random_uniform.csv")
 end
 
 if !isfile("benchmark_random_small.csv")
-    results = benchmark_random(trials=10, start=1000,step=1000,stop=10000)
+    results = benchmark_random(trials=10, start=1000, step=1000, stop=10000)
     CSV.write("benchmark_random_small.csv", results["sparse"])
 end
 
@@ -34,9 +34,8 @@ for csvfile in filter(f -> endswith(f, ".csv"), readdir())
     println("Plotting $csvfile")
     csvfile == "benchmark_stocks.csv" && continue   # skip stocks
     xlabel = csvfile == "benchmark_value_iteration.csv" ? "Number of States" :
-                                                          "Size of Probability Space (n)"
-    plt = plot_result(csvfile; xlabel = xlabel)
-    savefig(plt, replace(csvfile, ".csv" => ".pdf"))
+             "Size of Probability Space (n)"
+    plot_and_save_results(csvfile, xlabel=xlabel)
 end
 
 
